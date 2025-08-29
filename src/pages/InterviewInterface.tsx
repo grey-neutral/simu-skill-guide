@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Timer, Square, Mic, MicOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { interviewAPI } from "@/services/api";
 
 // Import persona images
 import hrFriendlyImage from "@/assets/persona-hr-friendly.jpg";
@@ -65,20 +66,13 @@ export default function InterviewInterface() {
   const initialTime = interviewLengths[interviewData?.length as keyof typeof interviewLengths] || 1800;
   
   const [timeLeft, setTimeLeft] = useState(initialTime);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "interviewer",
-      content: `Hello! I'm ${persona?.name || "your interviewer"}. Thank you for taking the time to speak with me today. I'm excited to learn more about you and your background. Let's start with a simple question: Could you please tell me a bit about yourself and what drew you to apply for this position?`,
-      timestamp: new Date(),
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const sessionId = interviewData?.sessionId || null;
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [userInterimTranscript, setUserInterimTranscript] = useState("");
   const recognitionRef = useRef<any>(null);
-  const speechQueueRef = useRef<string[]>([]);
   const isMountedRef = useRef<boolean>(false);
 
   // Timer effect
@@ -95,6 +89,19 @@ export default function InterviewInterface() {
 
     return () => clearInterval(timer);
   }, []);
+
+  // Initialize with initial greeting from backend
+  useEffect(() => {
+    if (interviewData?.initialGreeting && messages.length === 0) {
+      const initialMessage: Message = {
+        id: "initial",
+        sender: "interviewer",
+        content: interviewData.initialGreeting,
+        timestamp: new Date(),
+      };
+      setMessages([initialMessage]);
+    }
+  }, [interviewData, messages.length]);
 
   // Initialize SpeechRecognition if available
   useEffect(() => {
@@ -142,8 +149,8 @@ export default function InterviewInterface() {
             timestamp: new Date(),
           };
           setMessages(prev => [...prev, userMessage]);
-          // After user speaks, simulate AI response
-          simulateAiResponse();
+          // After user speaks, get real AI response from backend
+          handleUserMessage(finalTranscript.trim());
         }
       };
 
@@ -214,35 +221,95 @@ export default function InterviewInterface() {
     } catch {}
   };
 
-  const simulateAiResponse = () => {
+  const handleUserMessage = async (content: string) => {
+    if (!sessionId) {
+      toast({
+        title: "Session Error",
+        description: "No interview session found. Please restart the interview.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsTyping(true);
-    setTimeout(() => {
-      const responses = [
-        "That's interesting. Can you tell me more about how you handled challenges in that role?",
-        "I see. What would you say is your greatest strength when working in a team environment?",
-        "Thank you for sharing that. How do you typically approach problem-solving in your work?",
-        "That's a great example. Can you walk me through a specific situation where you had to adapt quickly?",
-        "Excellent. What do you know about our company culture and how do you see yourself fitting in?",
-      ];
+    
+    try {
+      const response = await interviewAPI.sendMessage(sessionId, content);
+      
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'interviewer',
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: response.response,
         timestamp: new Date(),
       };
+      
       setMessages(prev => [...prev, aiResponse]);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast({
+        title: "Communication Error",
+        description: "Failed to get interviewer response. Please try again.",
+        variant: "destructive",
+      });
+      
+      // Fallback to a generic response to keep the interview flowing
+      const fallbackResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'interviewer',
+        content: "I apologize, I'm having a brief technical issue. Could you please repeat your last response?",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, fallbackResponse]);
+    } finally {
       setIsTyping(false);
-    }, 1200);
+    }
   };
 
-  const handleEndInterview = () => {
-    navigate(`/feedback/${profileId}`, {
-      state: {
-        ...interviewData,
-        messages,
-        duration: initialTime - timeLeft,
-      }
-    });
+  const handleEndInterview = async () => {
+    if (!sessionId) {
+      navigate(`/feedback/${profileId}`, {
+        state: {
+          ...interviewData,
+          messages,
+          duration: initialTime - timeLeft,
+          sessionId: null,
+        }
+      });
+      return;
+    }
+
+    try {
+      // Stop the interview session and get feedback from backend
+      const feedback = await interviewAPI.stopInterview(sessionId);
+      
+      navigate(`/feedback/${profileId}`, {
+        state: {
+          ...interviewData,
+          messages,
+          duration: initialTime - timeLeft,
+          sessionId,
+          backendFeedback: feedback,
+        }
+      });
+    } catch (error) {
+      console.error('Failed to stop interview:', error);
+      toast({
+        title: "Error Ending Interview",
+        description: "There was an issue processing your interview. Proceeding to feedback.",
+        variant: "destructive",
+      });
+      
+      // Navigate to feedback anyway with available data
+      navigate(`/feedback/${profileId}`, {
+        state: {
+          ...interviewData,
+          messages,
+          duration: initialTime - timeLeft,
+          sessionId,
+          backendFeedback: null,
+        }
+      });
+    }
   };
 
   if (!interviewData || !persona) {

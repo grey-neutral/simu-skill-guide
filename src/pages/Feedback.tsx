@@ -13,6 +13,7 @@ import {
   Clock,
   Star
 } from "lucide-react";
+import { InterviewFeedback } from "@/services/api";
 
 export default function Feedback() {
   const { profileId } = useParams();
@@ -21,8 +22,23 @@ export default function Feedback() {
   
   const interviewData = location.state;
   
-  // Mock feedback data (in real app, this would come from AI analysis)
-  const feedback = {
+  // Use backend feedback if available, otherwise fallback to mock data
+  const backendFeedback: InterviewFeedback | null = interviewData?.backendFeedback || null;
+  
+  // Transform backend feedback to UI format or use mock data
+  const feedback = backendFeedback ? {
+    overallScore: Math.round(backendFeedback.scores.overall_fit),
+    scores: {
+      confidence: Math.round(backendFeedback.scores.confidence),
+      clarity: Math.round(backendFeedback.scores.clarity),
+      technical: 75, // Not provided by backend, use default
+      culturalFit: Math.round(backendFeedback.scores.overall_fit),
+    },
+    strengths: [], // Will be populated from improvements analysis
+    weaknesses: backendFeedback.improvements,
+    recommendations: backendFeedback.improvements,
+  } : {
+    // Fallback mock data
     overallScore: 78,
     scores: {
       confidence: 82,
@@ -49,6 +65,17 @@ export default function Feedback() {
       "Work on asking thoughtful questions at the end",
     ],
   };
+  
+  // Extract strengths from positive feedback or use defaults
+  if (backendFeedback && feedback.strengths.length === 0) {
+    // Analyze scores to generate strengths
+    const strengths = [];
+    if (backendFeedback.scores.confidence >= 70) strengths.push("Demonstrated good confidence in responses");
+    if (backendFeedback.scores.clarity >= 70) strengths.push("Clear and articulate communication style");
+    if (backendFeedback.scores.overall_fit >= 70) strengths.push("Good alignment with the role requirements");
+    
+    feedback.strengths = strengths.length > 0 ? strengths : ["Completed the interview successfully"];
+  }
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-green-600";
@@ -103,11 +130,16 @@ export default function Feedback() {
             <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
               <div className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                Duration: {formatDuration(interviewData.duration || 1800)}
+                Duration: {backendFeedback ? backendFeedback.duration : formatDuration(interviewData.duration || 1800)}
               </div>
               <Badge variant="outline" className="capitalize">
                 {interviewData.type?.replace('-', ' ')}
               </Badge>
+              {backendFeedback && (
+                <Badge variant="secondary">
+                  {backendFeedback.total_questions} questions asked
+                </Badge>
+              )}
             </div>
           </div>
         </div>
@@ -126,6 +158,12 @@ export default function Feedback() {
                    feedback.overallScore >= 60 ? "Good performance with room for improvement." :
                    "There's significant room for improvement. Keep practicing!"}
                 </p>
+                {backendFeedback?.conversation_summary && (
+                  <div className="mt-4 p-4 bg-muted rounded-lg">
+                    <h4 className="text-sm font-medium mb-2">Interview Summary</h4>
+                    <p className="text-xs text-muted-foreground">{backendFeedback.conversation_summary}</p>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>

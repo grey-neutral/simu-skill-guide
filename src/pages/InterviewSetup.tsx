@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,8 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { PersonaCard } from "@/components/PersonaCard";
-import { Clock, Play, FileText, Users, Settings } from "lucide-react";
+import { Clock, Play, FileText, Users, Settings, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { interviewAPI, InterviewConfig } from "@/services/api";
 
 // Import persona images
 import hrFriendlyImage from "@/assets/persona-hr-friendly.jpg";
@@ -83,6 +84,8 @@ export default function InterviewSetup() {
   const [selectedPersona, setSelectedPersona] = useState<string>("");
   const [selectedLength, setSelectedLength] = useState<string>("");
   const [jobDescription, setJobDescription] = useState<string>("");
+  const [isStarting, setIsStarting] = useState(false);
+  const [cvText, setCvText] = useState<string>("");
 
   const profileName = profileId === "1" ? "Google Software Engineer" : 
                      profileId === "2" ? "Morgan Stanley Analyst" : 
@@ -90,7 +93,15 @@ export default function InterviewSetup() {
 
   const canStartInterview = selectedType && selectedPersona && selectedLength && jobDescription.trim();
 
-  const handleStartInterview = () => {
+  // Load CV text from localStorage on component mount
+  useEffect(() => {
+    const storedCvText = localStorage.getItem('cvText');
+    if (storedCvText) {
+      setCvText(storedCvText);
+    }
+  }, []);
+
+  const handleStartInterview = async () => {
     if (!canStartInterview) {
       toast({
         title: "Missing Information",
@@ -100,15 +111,48 @@ export default function InterviewSetup() {
       return;
     }
 
-    // Navigate to interview simulation
-    navigate(`/interview/${profileId}`, { 
-      state: { 
-        type: selectedType,
-        persona: selectedPersona,
-        length: selectedLength,
-        jobDescription 
-      } 
-    });
+    setIsStarting(true);
+
+    try {
+      // Prepare interview configuration for backend
+      const interviewConfig: InterviewConfig = {
+        persona_id: selectedPersona,
+        interview_type: selectedType,
+        interview_length: selectedLength,
+        job_description: jobDescription.trim(),
+        cv_text: cvText || undefined, // Only include if we have CV text
+      };
+
+      // Start interview session with backend
+      const session = await interviewAPI.startInterview(interviewConfig);
+
+      toast({
+        title: "Interview Starting!",
+        description: `Session created with ${personas.find(p => p.id === selectedPersona)?.name}`,
+      });
+
+      // Navigate to interview interface with session data
+      navigate(`/interview/${profileId}`, { 
+        state: { 
+          sessionId: session.session_id,
+          initialGreeting: session.initial_greeting,
+          type: selectedType,
+          persona: selectedPersona,
+          length: selectedLength,
+          jobDescription,
+          cvText
+        } 
+      });
+    } catch (error) {
+      console.error('Failed to start interview:', error);
+      toast({
+        title: "Failed to Start Interview",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   return (
@@ -254,17 +298,28 @@ export default function InterviewSetup() {
                       {selectedPersona && <div>✓ Interviewer selected</div>}
                       {selectedLength && <div>✓ Duration selected</div>}
                       {jobDescription.trim() && <div>✓ Job description provided</div>}
+                      {cvText && <div>✓ CV text loaded for personalization</div>}
+                      {!cvText && <div className="opacity-60">• No CV uploaded (optional)</div>}
                     </div>
                   </div>
                   
                   <Button
                     onClick={handleStartInterview}
-                    disabled={!canStartInterview}
+                    disabled={!canStartInterview || isStarting}
                     variant="secondary"
                     className="w-full"
                   >
-                    <Play className="h-4 w-4 mr-2" />
-                    Start Interview
+                    {isStarting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Starting Interview...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4 mr-2" />
+                        Start Interview
+                      </>
+                    )}
                   </Button>
                 </div>
               </CardContent>

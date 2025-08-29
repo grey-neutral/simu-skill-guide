@@ -2,29 +2,67 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, FileText, CheckCircle, ArrowRight, Home } from "lucide-react";
+import { Upload, FileText, CheckCircle, ArrowRight, Home, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { interviewAPI } from "@/services/api";
 
 export default function CVUpload() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [extractedText, setExtractedText] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string>("");
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Reset previous states
+    setUploadError("");
+    setExtractedText("");
     setIsUploading(true);
-    // Simulate upload delay
-    setTimeout(() => {
-      setUploadedFile(file);
-      setIsUploading(false);
+
+    try {
+      // Validate file size (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error("File too large. Maximum size is 10MB.");
+      }
+
+      // Validate file type
+      const validTypes = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      if (!validTypes.includes(file.type)) {
+        throw new Error("Invalid file type. Please upload a PDF, TXT, DOC, or DOCX file.");
+      }
+
+      // Call backend API to extract text
+      const response = await interviewAPI.extractCV(file);
+      
+      if (response.success) {
+        setUploadedFile(file);
+        setExtractedText(response.extracted_text);
+        toast({
+          title: "CV Uploaded Successfully!",
+          description: `"${file.name}" has been processed and text extracted.`,
+        });
+      } else {
+        throw new Error(response.error_message || "Failed to extract text from CV");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+      setUploadError(errorMessage);
       toast({
-        title: "CV Uploaded Successfully!",
-        description: `"${file.name}" has been uploaded and is ready for use.`,
+        title: "Upload Failed",
+        description: errorMessage,
+        variant: "destructive",
       });
-    }, 1500);
+      
+      // Reset file input
+      const input = event.target;
+      input.value = '';
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -60,6 +98,18 @@ export default function CVUpload() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {uploadError && (
+              <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                  <div>
+                    <h3 className="font-medium text-red-900 dark:text-red-100">Upload Error</h3>
+                    <p className="text-sm text-red-700 dark:text-red-300">{uploadError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {!uploadedFile ? (
               <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center space-y-4">
                 <div className="mx-auto w-16 h-16 bg-muted rounded-full flex items-center justify-center">
@@ -105,14 +155,31 @@ export default function CVUpload() {
                   </div>
                 </div>
                 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <p className="text-sm text-green-700 dark:text-green-300">
                     Your CV will be used to personalize interview questions and provide relevant feedback.
                   </p>
                   
+                  {/* Show extracted text preview */}
+                  {extractedText && (
+                    <div className="bg-white dark:bg-gray-900 border rounded-lg p-3 max-h-32 overflow-y-auto">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">Extracted Text Preview:</p>
+                      <p className="text-xs text-gray-800 dark:text-gray-200 leading-relaxed">
+                        {extractedText.length > 300 
+                          ? `${extractedText.substring(0, 300)}...` 
+                          : extractedText
+                        }
+                      </p>
+                    </div>
+                  )}
+                  
                   <div className="flex gap-3">
                     <Button
-                      onClick={() => navigate('/job-profiles')}  
+                      onClick={() => {
+                        // Store extracted text for use in interviews
+                        localStorage.setItem('cvText', extractedText);
+                        navigate('/job-profiles');
+                      }}  
                       className="flex-1"
                     >
                       Continue to Job Profiles
@@ -123,6 +190,8 @@ export default function CVUpload() {
                       variant="outline"
                       onClick={() => {
                         setUploadedFile(null);
+                        setExtractedText("");
+                        setUploadError("");
                         // Reset file input
                         const input = document.getElementById('cv-upload') as HTMLInputElement;
                         if (input) input.value = '';

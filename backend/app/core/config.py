@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str
     
     # CORS Configuration
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    cors_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:8080"
     
     # Session Configuration
     max_session_duration: int = 3600  # 1 hour in seconds
