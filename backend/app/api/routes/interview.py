@@ -86,6 +86,45 @@ async def stop_interview(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate feedback: {str(e)}")
 
+@router.post("/interview/test-voice")
+async def test_voice_generation(text: str = "Hello! This is a test of the ElevenLabs voice synthesis.", persona_id: str = "hr-friendly"):
+    """Test endpoint for ElevenLabs voice generation"""
+    try:
+        from ...services.elevenlabs_service import elevenlabs_service
+        from ...core.models import PersonaId
+        import base64
+        
+        # Convert persona_id string to PersonaId enum
+        persona_enum = PersonaId(persona_id)
+        
+        # Generate voice
+        audio_data = await elevenlabs_service.text_to_speech(text, persona_enum)
+        
+        if audio_data:
+            # Convert to base64 for response
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            return {
+                "success": True,
+                "message": "Voice generated successfully",
+                "audio_base64": audio_base64,
+                "text": text,
+                "persona": persona_id,
+                "audio_size_bytes": len(audio_data)
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to generate voice",
+                "error": "ElevenLabs API returned empty response"
+            }
+    
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Voice generation failed: {str(e)}",
+            "error": str(e)
+        }
+
 @router.post("/interview/message/{session_id}")
 async def add_message_to_conversation(session_id: str, message_data: Dict[str, Any]):
     """Add a message to the conversation and get interviewer response"""

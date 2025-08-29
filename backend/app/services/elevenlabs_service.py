@@ -1,8 +1,6 @@
 from elevenlabs.client import ElevenLabs
-from elevenlabs import VoiceSettings
 from typing import Dict, List, Optional
 import asyncio
-import httpx
 from ..core.config import settings
 from ..core.models import PersonaId
 
@@ -11,7 +9,7 @@ class ElevenLabsService:
     def __init__(self):
         self.client = ElevenLabs(api_key=settings.elevenlabs_api_key)
         
-        # Map personas to ElevenLabs voice IDs (you'll need to replace with actual voice IDs)
+        # Map personas to ElevenLabs voice IDs
         self.persona_voices = {
             PersonaId.HR_FRIENDLY: "21m00Tcm4TlvDq8ikWAM",  # Rachel - warm female voice
             PersonaId.MANAGER_CRITICAL: "29vD33N1CtxCmqQRPOHJ",  # Drew - authoritative male
@@ -19,29 +17,26 @@ class ElevenLabsService:
             PersonaId.STRESS_INTERVIEWER: "Yko7PKHZNXotIFUBG7I9",  # Antoni - intense male
             PersonaId.CEO_EXECUTIVE: "TX3LPaxmHKxFdv7VOQHJ",  # Liam - professional male
         }
-        
-        self.voice_settings = VoiceSettings(
-            stability=0.71,
-            similarity_boost=0.5,
-            style=0.0,
-            use_speaker_boost=True
-        )
     
     async def text_to_speech(self, text: str, persona_id: PersonaId) -> bytes:
         """Convert text to speech using ElevenLabs"""
         try:
             voice_id = self.persona_voices.get(persona_id, self.persona_voices[PersonaId.HR_FRIENDLY])
             
-            # Use the sync client in an async context
-            audio = self.client.generate(
+            # Use the correct API method
+            audio = self.client.text_to_speech.convert(
                 text=text,
-                voice=voice_id,
-                voice_settings=self.voice_settings,
-                model="eleven_monolingual_v1"
+                voice_id=voice_id,
+                model_id="eleven_multilingual_v2",
+                output_format="mp3_44100_128"
             )
             
-            # Convert generator to bytes
-            audio_bytes = b"".join(audio)
+            # Convert generator/iterator to bytes if needed
+            if hasattr(audio, '__iter__') and not isinstance(audio, bytes):
+                audio_bytes = b"".join(audio)
+            else:
+                audio_bytes = audio
+                
             return audio_bytes
         
         except Exception as e:
@@ -79,16 +74,15 @@ class ElevenLabsService:
             voice_id = self.persona_voices.get(persona_id, self.persona_voices[PersonaId.HR_FRIENDLY])
             
             # Generate streaming audio
-            audio_stream = self.client.generate(
+            audio_stream = self.client.text_to_speech.stream(
                 text=text,
-                voice=voice_id,
-                voice_settings=self.voice_settings,
-                model="eleven_monolingual_v1",
-                stream=True
+                voice_id=voice_id,
+                model_id="eleven_multilingual_v2"
             )
             
             for chunk in audio_stream:
-                yield chunk
+                if isinstance(chunk, bytes):
+                    yield chunk
         
         except Exception as e:
             print(f"ElevenLabs streaming error: {e}")

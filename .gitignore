@@ -38,7 +38,5 @@ openai_service.cpython*
 pdf_service.cpython*
 persona_service.cpython*
 
-
-
-
-c
+voice.cpython*
+elevenlabs_service.cpython*

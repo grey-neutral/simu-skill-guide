@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.routes import personas, cv, interview
+from app.api.websocket.voice import handle_voice_websocket
 import uvicorn
 
 # Create FastAPI app
@@ -24,6 +25,12 @@ app.add_middleware(
 app.include_router(personas.router, prefix="/api", tags=["personas"])
 app.include_router(cv.router, prefix="/api", tags=["cv"])
 app.include_router(interview.router, prefix="/api", tags=["interview"])
+
+# WebSocket endpoint for voice communication
+@app.websocket("/api/interview/voice/{session_id}")
+async def websocket_voice_endpoint(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for real-time voice communication"""
+    await handle_voice_websocket(websocket, session_id)
 
 # Health check endpoint
 @app.get("/api/health")
