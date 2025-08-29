@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Upload, Users, TrendingUp, Plus, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Upload, Users, TrendingUp, Plus, FileText, MoreHorizontal, Pencil, Trash2, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -88,8 +88,13 @@ export function AppSidebar() {
     <div className="w-80 bg-card border-r border-border h-screen flex flex-col shadow-professional">
       {/* Header */}
       <div className="p-6 border-b border-border">
-        <h1 className="text-xl font-bold text-foreground">Interview Simulator</h1>
-        <p className="text-sm text-muted-foreground mt-1">AI-Powered Practice Sessions</p>
+        <NavLink
+          to="/"
+          className="block hover:opacity-80 transition-opacity"
+        >
+          <h1 className="text-xl font-bold text-foreground">Interview Simulator</h1>
+          <p className="text-sm text-muted-foreground mt-1">AI-Powered Practice Sessions</p>
+        </NavLink>
       </div>
 
       {/* My CV Section */}
@@ -129,7 +134,7 @@ export function AppSidebar() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Users className="h-4 w-4" />
-            Profiles
+            Job Profiles
           </h2>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <DialogTrigger asChild>
