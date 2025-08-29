@@ -12,9 +12,9 @@ class ElevenLabsService:
         # Map personas to ElevenLabs voice IDs
         self.persona_voices = {
             PersonaId.HR_FRIENDLY: "21m00Tcm4TlvDq8ikWAM",  # Rachel - warm female voice
-            PersonaId.MANAGER_CRITICAL: "29vD33N1CtxCmqQRPOHJ",  # Drew - authoritative male
+            PersonaId.MANAGER_CRITICAL: "8sZxD42zKDvoEXNxBTdX",  # Robert Martinez - authoritative male
             PersonaId.TECH_EXPERT: "pNInz6obpgDQGcFmaJgB",  # Adam - clear male voice
-            PersonaId.STRESS_INTERVIEWER: "Yko7PKHZNXotIFUBG7I9",  # Antoni - intense male
+            PersonaId.STRESS_INTERVIEWER: "DMyrgzQFny3JI1Y1paM5",  # Marcus Thompson - intense male
             PersonaId.CEO_EXECUTIVE: "TX3LPaxmHKxFdv7VOQHJ",  # Liam - professional male
         }
     

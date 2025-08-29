@@ -152,7 +152,8 @@ export default function InterviewInterface() {
       };
       recognition.onend = () => {
         console.log('=== Speech recognition ENDED');
-        setIsListening(false);
+        // Don't automatically reset listening state - let user control it
+        // setIsListening(false);
       };
       recognition.onresult = (event: any) => {
         let finalTranscript = "";
@@ -170,31 +171,9 @@ export default function InterviewInterface() {
         }
         if (finalTranscript.trim()) {
           console.log('=== Final transcript received:', finalTranscript.trim());
-          setUserInterimTranscript("");
-          
-          // Prevent multiple simultaneous processing
-          if (isTyping || isSpeaking) {
-            console.log('Already processing, ignoring speech input');
-            return;
-          }
-          
-          const userMessage: Message = {
-            id: Date.now().toString(),
-            sender: 'user',
-            content: finalTranscript.trim(),
-            timestamp: new Date(),
-          };
-          
-          console.log('Adding user message to messages:', userMessage);
-          setMessages(prev => {
-            const newMessages = [...prev, userMessage];
-            console.log('Messages after adding user message:', newMessages);
-            return newMessages;
-          });
-          
-          // Always use REST API for now (WebSocket disabled)
-          console.log('About to call handleUserMessage with:', finalTranscript.trim());
-          handleUserMessage(finalTranscript.trim());
+          // Store the final transcript but don't process it yet
+          // Wait for user to click "Stop Listening"
+          setUserInterimTranscript(finalTranscript.trim());
         }
       };
 
@@ -275,6 +254,61 @@ export default function InterviewInterface() {
         });
       }
     }, 500); // Increased delay to ensure clean state
+  };
+
+  const stopListening = () => {
+    if (!recognitionRef.current || !isListening) {
+      return;
+    }
+    
+    console.log('=== Stopping speech recognition...');
+    try {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      
+      // Process the final transcript if we have one
+      if (userInterimTranscript.trim()) {
+        console.log('=== Processing final transcript:', userInterimTranscript.trim());
+        
+        // Prevent multiple simultaneous processing
+        if (isTyping || isSpeaking) {
+          console.log('Already processing, ignoring speech input');
+          setUserInterimTranscript("");
+          return;
+        }
+        
+        const userMessage: Message = {
+          id: Date.now().toString(),
+          sender: 'user',
+          content: userInterimTranscript.trim(),
+          timestamp: new Date(),
+        };
+        
+        console.log('Adding user message to messages:', userMessage);
+        setMessages(prev => {
+          const newMessages = [...prev, userMessage];
+          console.log('Messages after adding user message:', newMessages);
+          return newMessages;
+        });
+        
+        // Process the user message
+        console.log('About to call handleUserMessage with:', userInterimTranscript.trim());
+        handleUserMessage(userInterimTranscript.trim());
+        
+        // Clear the transcript
+        setUserInterimTranscript("");
+      }
+    } catch (error) {
+      console.error('Failed to stop speech recognition:', error);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
   };
 
   // Removed handleVoiceMessage - not needed for simplified approach
@@ -587,7 +621,7 @@ export default function InterviewInterface() {
             </div>
             <div className="flex items-center gap-2">
               {isListening ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
-              {isListening ? 'Listening for your response…' : 'Waiting…'}
+              {isListening ? 'Listening... Click "Stop & Process" when done' : 'Waiting…'}
             </div>
           </div>
           
@@ -595,11 +629,21 @@ export default function InterviewInterface() {
           <div className="mt-2">
             <Button 
               size="sm" 
-              variant="outline"
-              onClick={startListening}
-              disabled={isListening || isSpeaking || isTyping}
+              variant={isListening ? "destructive" : "outline"}
+              onClick={toggleListening}
+              disabled={isSpeaking || isTyping}
             >
-              {isListening ? 'Listening...' : 'Start Listening'}
+              {isListening ? (
+                <>
+                  <MicOff className="h-4 w-4 mr-2" />
+                  Stop & Process
+                </>
+              ) : (
+                <>
+                  <Mic className="h-4 w-4 mr-2" />
+                  Start Listening
+                </>
+              )}
             </Button>
           </div>
         </div>
