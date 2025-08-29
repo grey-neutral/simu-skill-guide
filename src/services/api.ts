@@ -205,11 +205,18 @@ export class VoiceWebSocketManager {
 
   sendText(content: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      console.log('Sending text via WebSocket:', content);
       this.ws.send(JSON.stringify({
         type: 'text_message',
         content,
       }));
+    } else {
+      console.error('WebSocket not connected, cannot send text');
     }
+  }
+  
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   disconnect() {

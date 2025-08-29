@@ -74,6 +74,7 @@ export default function InterviewInterface() {
   const [userInterimTranscript, setUserInterimTranscript] = useState("");
   const recognitionRef = useRef<any>(null);
   const isMountedRef = useRef<boolean>(false);
+  // Removed WebSocket state - using simple ElevenLabs API only
 
   // Timer effect
   useEffect(() => {
@@ -103,6 +104,8 @@ export default function InterviewInterface() {
     }
   }, [interviewData, messages.length]);
 
+  // Using simple ElevenLabs API - no WebSocket complexity
+
   // Initialize SpeechRecognition if available
   useEffect(() => {
     // @ts-ignore
@@ -116,15 +119,40 @@ export default function InterviewInterface() {
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
+        console.log('=== Speech recognition STARTED successfully');
         setIsListening(true);
         setUserInterimTranscript("");
       };
-      recognition.onerror = () => {
+      recognition.onerror = (event) => {
+        console.error('=== Speech recognition ERROR:', event.error);
         setIsListening(false);
+        
+        // Show specific error messages
+        let errorMessage = 'Speech recognition failed.';
+        switch (event.error) {
+          case 'not-allowed':
+            errorMessage = 'Microphone access denied. Please allow microphone access.';
+            break;
+          case 'no-speech':
+            errorMessage = 'No speech detected. Please try speaking again.';
+            break;
+          case 'network':
+            errorMessage = 'Network error. Please check your connection.';
+            break;
+          case 'audio-capture':
+            errorMessage = 'Microphone not found. Please check your microphone.';
+            break;
+        }
+        
+        toast({
+          title: 'Speech Recognition Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       };
       recognition.onend = () => {
+        console.log('=== Speech recognition ENDED');
         setIsListening(false);
-        // If we ended without final transcript, do nothing
       };
       recognition.onresult = (event: any) => {
         let finalTranscript = "";
@@ -141,15 +169,31 @@ export default function InterviewInterface() {
           setUserInterimTranscript(interimTranscript);
         }
         if (finalTranscript.trim()) {
+          console.log('=== Final transcript received:', finalTranscript.trim());
           setUserInterimTranscript("");
+          
+          // Prevent multiple simultaneous processing
+          if (isTyping || isSpeaking) {
+            console.log('Already processing, ignoring speech input');
+            return;
+          }
+          
           const userMessage: Message = {
             id: Date.now().toString(),
             sender: 'user',
             content: finalTranscript.trim(),
             timestamp: new Date(),
           };
-          setMessages(prev => [...prev, userMessage]);
-          // After user speaks, get real AI response from backend
+          
+          console.log('Adding user message to messages:', userMessage);
+          setMessages(prev => {
+            const newMessages = [...prev, userMessage];
+            console.log('Messages after adding user message:', newMessages);
+            return newMessages;
+          });
+          
+          // Always use REST API for now (WebSocket disabled)
+          console.log('About to call handleUserMessage with:', finalTranscript.trim());
           handleUserMessage(finalTranscript.trim());
         }
       };
@@ -170,38 +214,24 @@ export default function InterviewInterface() {
     };
   }, []);
 
-  // Speak interviewer messages via Speech Synthesis
+  // SINGLE voice generation trigger - only for new interviewer messages
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage || lastMessage.sender !== 'interviewer') return;
-
-    const utterance = new SpeechSynthesisUtterance(lastMessage.content);
-    utterance.lang = 'en-US';
-    utterance.rate = 1;
-    utterance.pitch = 1;
-
-    const handleStart = () => setIsSpeaking(true);
-    const handleEnd = () => {
-      setIsSpeaking(false);
-      // After TTS ends, start listening for user response
-      startListening();
-    };
-
-    utterance.onstart = handleStart;
-    utterance.onend = handleEnd;
-    utterance.onerror = () => setIsSpeaking(false);
-
-    try {
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      // If TTS not available, just toggle states with a timeout fallback
-      setIsSpeaking(true);
-      const duration = Math.min(lastMessage.content.length * 50, 4000);
-      setTimeout(() => handleEnd(), duration);
+    
+    // Only generate voice if this message doesn't already have voice generated
+    if (!lastMessage.id.includes('voice-generated')) {
+      console.log('Generating voice for:', lastMessage.content.substring(0, 50) + '...');
+      
+      // Mark message as having voice generated to prevent duplicates
+      setMessages(prev => prev.map(msg => 
+        msg.id === lastMessage.id 
+          ? { ...msg, id: `voice-generated-${msg.id}` }
+          : msg
+      ));
+      
+      generateElevenLabsAudio(lastMessage.content);
     }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
   const formatTime = (seconds: number) => {
@@ -212,17 +242,167 @@ export default function InterviewInterface() {
 
   const startListening = () => {
     // Do not start if recognition unsupported
-    if (!recognitionRef.current) return;
+    if (!recognitionRef.current) {
+      console.log('Speech recognition not available');
+      return;
+    }
+    
+    // Don't start if already listening or processing
+    if (isListening || isSpeaking || isTyping) {
+      console.log('Cannot start listening - already busy:', { isListening, isSpeaking, isTyping });
+      return;
+    }
+    
+    console.log('=== Starting speech recognition...');
     try {
+      // Stop any existing recognition
       recognitionRef.current.abort();
-    } catch {}
+    } catch (e) {
+      console.log('No existing recognition to abort');
+    }
+    
+    setTimeout(() => {
+      try {
+        console.log('Actually starting recognition...');
+        recognitionRef.current.start();
+        console.log('Recognition start called successfully');
+      } catch (error) {
+        console.error('Failed to start speech recognition:', error);
+        toast({
+          title: 'Microphone Error',
+          description: 'Please allow microphone access and try again.',
+          variant: 'destructive',
+        });
+      }
+    }, 500); // Increased delay to ensure clean state
+  };
+
+  // Removed handleVoiceMessage - not needed for simplified approach
+
+  const generateElevenLabsAudio = async (text: string) => {
     try {
-      recognitionRef.current.start();
-    } catch {}
+      setIsSpeaking(true);
+      console.log('Generating ElevenLabs audio for:', text.substring(0, 100) + '...');
+      
+      // Get persona ID from interview data
+      const personaId = interviewData?.persona || 'hr-friendly';
+      console.log('Using persona:', personaId);
+      
+      // Call the test-voice endpoint to generate ElevenLabs audio
+      const response = await fetch(`http://localhost:8000/api/interview/test-voice?text=${encodeURIComponent(text)}&persona_id=${encodeURIComponent(personaId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.audio_base64) {
+        console.log('ElevenLabs audio generated successfully');
+        playAudioResponse(result.audio_base64);
+      } else {
+        throw new Error(result.message || 'Failed to generate audio');
+      }
+    } catch (error) {
+      console.error('Failed to generate ElevenLabs audio:', error);
+      // Fallback to browser TTS
+      fallbackToBrowserTTS(text);
+    }
+  };
+
+  const fallbackToBrowserTTS = (text: string) => {
+    console.log('Falling back to browser TTS');
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setTimeout(() => {
+        if (!isMountedRef.current) return;
+        startListening();
+      }, 500);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setTimeout(() => {
+        if (!isMountedRef.current) return;
+        startListening();
+      }, 500);
+    };
+
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.error('TTS failed:', e);
+      setIsSpeaking(false);
+      setTimeout(() => startListening(), 1000);
+    }
+  };
+
+  const playAudioResponse = (audioBase64: string) => {
+    try {
+      // Convert base64 to audio blob
+      const audioData = atob(audioBase64);
+      const arrayBuffer = new ArrayBuffer(audioData.length);
+      const view = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < audioData.length; i++) {
+        view[i] = audioData.charCodeAt(i);
+      }
+      
+      // Create audio blob and play
+      const blob = new Blob([arrayBuffer], { type: 'audio/mp3' });
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      
+      // ONLY start listening when audio completely finishes
+      audio.onended = () => {
+        console.log('=== Audio finished playing, now starting to listen');
+        setIsSpeaking(false);
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            console.log('=== Calling startListening after audio ended');
+            startListening();
+          } else {
+            console.log('Component unmounted, not starting listening');
+          }
+        }, 1000); // 1 second delay to ensure clean transition
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      audio.onerror = () => {
+        console.error('Audio playback error');
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      // Play the audio
+      audio.play().catch((error) => {
+        console.error('Failed to play audio:', error);
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      });
+    } catch (error) {
+      console.error('Failed to play audio:', error);
+      setIsSpeaking(false);
+    }
   };
 
   const handleUserMessage = async (content: string) => {
+    console.log('=== handleUserMessage called with:', content);
+    console.log('Session ID:', sessionId);
+    console.log('Current states:', { isTyping, isSpeaking, isListening });
+    
     if (!sessionId) {
+      console.error('No session ID available');
       toast({
         title: "Session Error",
         description: "No interview session found. Please restart the interview.",
@@ -231,19 +411,37 @@ export default function InterviewInterface() {
       return;
     }
 
+    // Prevent multiple simultaneous requests
+    if (isTyping || isSpeaking) {
+      console.log('Already processing, ignoring new message');
+      return;
+    }
+
+    console.log('Setting isTyping to true and calling API...');
     setIsTyping(true);
     
     try {
+      console.log('Calling interviewAPI.sendMessage...');
       const response = await interviewAPI.sendMessage(sessionId, content);
+      console.log('API Response received:', response);
       
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        sender: 'interviewer',
-        content: response.response,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, aiResponse]);
+      if (response && response.response) {
+        const aiResponse: Message = {
+          id: `rest-api-${Date.now()}`,
+          sender: 'interviewer',
+          content: response.response,
+          timestamp: new Date(),
+        };
+        
+        console.log('Adding AI response to messages:', aiResponse);
+        setMessages(prev => {
+          const newMessages = [...prev, aiResponse];
+          console.log('New messages array:', newMessages);
+          return newMessages;
+        });
+      } else {
+        throw new Error('Invalid response format from API');
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       toast({
@@ -254,13 +452,15 @@ export default function InterviewInterface() {
       
       // Fallback to a generic response to keep the interview flowing
       const fallbackResponse: Message = {
-        id: (Date.now() + 1).toString(),
+        id: `fallback-${Date.now()}`,
         sender: 'interviewer',
         content: "I apologize, I'm having a brief technical issue. Could you please repeat your last response?",
         timestamp: new Date(),
       };
+      console.log('Adding fallback response:', fallbackResponse);
       setMessages(prev => [...prev, fallbackResponse]);
     } finally {
+      console.log('Setting isTyping to false');
       setIsTyping(false);
     }
   };
@@ -379,10 +579,28 @@ export default function InterviewInterface() {
             {messages.filter(m => m.sender === 'interviewer').slice(-1)[0]?.content}
           </div>
 
-          {/* Listening indicator */}
-          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-            {isListening ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
-            {isListening ? 'Listening for your response…' : 'Waiting…'}
+          {/* Voice connection and listening indicators */}
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              ElevenLabs Voice
+            </div>
+            <div className="flex items-center gap-2">
+              {isListening ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
+              {isListening ? 'Listening for your response…' : 'Waiting…'}
+            </div>
+          </div>
+          
+          {/* Manual listening button for testing */}
+          <div className="mt-2">
+            <Button 
+              size="sm" 
+              variant="outline"
+              onClick={startListening}
+              disabled={isListening || isSpeaking || isTyping}
+            >
+              {isListening ? 'Listening...' : 'Start Listening'}
+            </Button>
           </div>
         </div>
 

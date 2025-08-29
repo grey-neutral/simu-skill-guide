@@ -17,7 +17,7 @@ class PersonaService:
                 "description": "Experienced hiring manager with high standards. Asks challenging questions about your experience and expects detailed, well-thought-out responses.",
                 "style": "Direct and analytical",
                 "difficulty": "Hard",
-                "voice_id": "29vD33N1CtxCmqQRPOHJ"
+                "voice_id": "8sZxD42zKDvoEXNxBTdX"
             },
             PersonaId.TECH_EXPERT: {
                 "name": "Dr. Emily Watson",
@@ -31,7 +31,7 @@ class PersonaService:
                 "description": "Tests your performance under pressure with rapid-fire questions and challenging scenarios. Designed to see how you handle stress and think on your feet.",
                 "style": "Intense and fast-paced",
                 "difficulty": "Hard",
-                "voice_id": "Yko7PKHZNXotIFUBG7I9"
+                "voice_id": "DMyrgzQFny3JI1Y1paM5"
             },
             PersonaId.CEO_EXECUTIVE: {
                 "name": "James Wilson",

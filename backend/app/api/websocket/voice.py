@@ -37,7 +37,12 @@ class VoiceConnectionManager:
         """Send message to specific session"""
         if session_id in self.active_connections:
             websocket = self.active_connections[session_id]
-            await websocket.send_text(json.dumps(message))
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                print(f"Failed to send message to {session_id}: {e}")
+                # Remove dead connection
+                self.disconnect(session_id)
     
     async def send_audio(self, session_id: str, audio_data: bytes, text: str):
         """Send audio data to client"""
@@ -87,10 +92,13 @@ async def handle_voice_websocket(websocket: WebSocket, session_id: str):
         voice_manager.disconnect(session_id)
     except Exception as e:
         print(f"WebSocket error for session {session_id}: {e}")
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "message": f"Voice processing error: {str(e)}"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": f"Voice processing error: {str(e)}"
+            }))
+        except:
+            pass  # Connection already closed
         voice_manager.disconnect(session_id)
 
 
@@ -122,10 +130,13 @@ async def process_voice_message(session_id: str, message_data: Dict[str, Any], w
     
     except Exception as e:
         print(f"Error processing voice message: {e}")
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "message": f"Processing error: {str(e)}"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": f"Processing error: {str(e)}"
+            }))
+        except:
+            pass  # Connection already closed
 
 
 async def handle_audio_input(session_id: str, message_data: Dict[str, Any], websocket: WebSocket):
@@ -140,31 +151,40 @@ async def handle_audio_input(session_id: str, message_data: Dict[str, Any], webs
         audio_bytes = base64.b64decode(audio_base64)
         
         # Send processing status
-        await websocket.send_text(json.dumps({
-            "type": "status",
-            "message": "Processing audio...",
-            "status": "transcribing"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "status",
+                "message": "Processing audio...",
+                "status": "transcribing"
+            }))
+        except:
+            return  # Connection closed
         
         # Transcribe audio using OpenAI Whisper
         transcribed_text = await openai_service.transcribe_audio(audio_bytes)
         
         # Send transcription result
-        await websocket.send_text(json.dumps({
-            "type": "transcription",
-            "text": transcribed_text,
-            "timestamp": datetime.now().isoformat()
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "transcription",
+                "text": transcribed_text,
+                "timestamp": datetime.now().isoformat()
+            }))
+        except:
+            return  # Connection closed
         
         # Process the transcribed text
         await process_candidate_response(session_id, transcribed_text, websocket)
     
     except Exception as e:
         print(f"Audio processing error: {e}")
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "message": "Failed to process audio input"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Failed to process audio input"
+            }))
+        except:
+            pass  # Connection already closed
 
 
 async def handle_text_input(session_id: str, message_data: Dict[str, Any], websocket: WebSocket):
@@ -189,11 +209,14 @@ async def process_candidate_response(session_id: str, content: str, websocket: W
         session_manager.add_message(session_id, candidate_message)
         
         # Send thinking status
-        await websocket.send_text(json.dumps({
-            "type": "status",
-            "message": "Generating response...",
-            "status": "thinking"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "status",
+                "message": "Generating response...",
+                "status": "thinking"
+            }))
+        except:
+            return  # Connection closed
         
         # Generate system prompt
         system_prompt = persona_service.build_system_prompt(session)
@@ -214,19 +237,25 @@ async def process_candidate_response(session_id: str, content: str, websocket: W
         session_manager.add_message(session_id, interviewer_message)
         
         # Send text response first
-        await websocket.send_text(json.dumps({
-            "type": "text_response",
-            "text": interviewer_response,
-            "question_count": session.question_count,
-            "timestamp": datetime.now().isoformat()
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "text_response",
+                "text": interviewer_response,
+                "question_count": session.question_count,
+                "timestamp": datetime.now().isoformat()
+            }))
+        except:
+            return  # Connection closed
         
         # Generate voice response
-        await websocket.send_text(json.dumps({
-            "type": "status",
-            "message": "Converting to speech...",
-            "status": "generating_voice"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "status",
+                "message": "Converting to speech...",
+                "status": "generating_voice"
+            }))
+        except:
+            return  # Connection closed
         
         # Convert to speech using ElevenLabs
         audio_data = await elevenlabs_service.text_to_speech(
@@ -239,14 +268,20 @@ async def process_candidate_response(session_id: str, content: str, websocket: W
             await voice_manager.send_audio(session_id, audio_data, interviewer_response)
         else:
             # Fallback if TTS fails
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": "Failed to generate voice response, but text response is available"
-            }))
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Failed to generate voice response, but text response is available"
+                }))
+            except:
+                pass  # Connection already closed
     
     except Exception as e:
         print(f"Response generation error: {e}")
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "message": "Failed to generate interviewer response"
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Failed to generate interviewer response"
+            }))
+        except:
+            pass  # Connection already closed
