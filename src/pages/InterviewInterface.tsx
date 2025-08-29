@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Timer, Send, Square, Home } from "lucide-react";
+import { Timer, Square, Mic, MicOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 // Import persona images
@@ -66,7 +65,6 @@ export default function InterviewInterface() {
   const initialTime = interviewLengths[interviewData?.length as keyof typeof interviewLengths] || 1800;
   
   const [timeLeft, setTimeLeft] = useState(initialTime);
-  const [currentMessage, setCurrentMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -77,6 +75,11 @@ export default function InterviewInterface() {
   ]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [userInterimTranscript, setUserInterimTranscript] = useState("");
+  const recognitionRef = useRef<any>(null);
+  const speechQueueRef = useRef<string[]>([]);
+  const isMountedRef = useRef<boolean>(false);
 
   // Timer effect
   useEffect(() => {
@@ -93,15 +96,105 @@ export default function InterviewInterface() {
     return () => clearInterval(timer);
   }, []);
 
-  // Simulate AI speaking animation
+  // Initialize SpeechRecognition if available
+  useEffect(() => {
+    // @ts-ignore
+    const SpeechRecognitionImpl: typeof window.SpeechRecognition | typeof window.webkitSpeechRecognition | undefined = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognitionImpl) {
+      // @ts-ignore
+      const recognition: SpeechRecognition = new SpeechRecognitionImpl();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setUserInterimTranscript("");
+      };
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+        // If we ended without final transcript, do nothing
+      };
+      recognition.onresult = (event: any) => {
+        let finalTranscript = "";
+        let interimTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalTranscript += result[0].transcript;
+          } else {
+            interimTranscript += result[0].transcript;
+          }
+        }
+        if (interimTranscript) {
+          setUserInterimTranscript(interimTranscript);
+        }
+        if (finalTranscript.trim()) {
+          setUserInterimTranscript("");
+          const userMessage: Message = {
+            id: Date.now().toString(),
+            sender: 'user',
+            content: finalTranscript.trim(),
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, userMessage]);
+          // After user speaks, simulate AI response
+          simulateAiResponse();
+        }
+      };
+
+      recognitionRef.current = recognition;
+    } else {
+      toast({
+        title: 'Speech Recognition unavailable',
+        description: 'Your browser does not support speech-to-text. Please use Chrome.',
+        variant: 'destructive',
+      });
+    }
+
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      recognitionRef.current?.abort();
+    };
+  }, []);
+
+  // Speak interviewer messages via Speech Synthesis
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.sender === 'interviewer') {
+    if (!lastMessage || lastMessage.sender !== 'interviewer') return;
+
+    const utterance = new SpeechSynthesisUtterance(lastMessage.content);
+    utterance.lang = 'en-US';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    const handleStart = () => setIsSpeaking(true);
+    const handleEnd = () => {
+      setIsSpeaking(false);
+      // After TTS ends, start listening for user response
+      startListening();
+    };
+
+    utterance.onstart = handleStart;
+    utterance.onend = handleEnd;
+    utterance.onerror = () => setIsSpeaking(false);
+
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      // If TTS not available, just toggle states with a timeout fallback
       setIsSpeaking(true);
-      const speakingDuration = Math.min(lastMessage.content.length * 50, 5000); // Max 5 seconds
-      const timer = setTimeout(() => setIsSpeaking(false), speakingDuration);
-      return () => clearTimeout(timer);
+      const duration = Math.min(lastMessage.content.length * 50, 4000);
+      setTimeout(() => handleEnd(), duration);
     }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
   const formatTime = (seconds: number) => {
@@ -110,21 +203,19 @@ export default function InterviewInterface() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleSendMessage = async () => {
-    if (!currentMessage.trim()) return;
+  const startListening = () => {
+    // Do not start if recognition unsupported
+    if (!recognitionRef.current) return;
+    try {
+      recognitionRef.current.abort();
+    } catch {}
+    try {
+      recognitionRef.current.start();
+    } catch {}
+  };
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      sender: 'user',
-      content: currentMessage.trim(),
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setCurrentMessage("");
+  const simulateAiResponse = () => {
     setIsTyping(true);
-
-    // Simulate AI response
     setTimeout(() => {
       const responses = [
         "That's interesting. Can you tell me more about how you handled challenges in that role?",
@@ -133,17 +224,15 @@ export default function InterviewInterface() {
         "That's a great example. Can you walk me through a specific situation where you had to adapt quickly?",
         "Excellent. What do you know about our company culture and how do you see yourself fitting in?",
       ];
-
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'interviewer',
         content: responses[Math.floor(Math.random() * responses.length)],
         timestamp: new Date(),
       };
-
       setMessages(prev => [...prev, aiResponse]);
       setIsTyping(false);
-    }, 2000);
+    }, 1200);
   };
 
   const handleEndInterview = () => {
@@ -175,139 +264,118 @@ export default function InterviewInterface() {
       <div className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center justify-between">
           <Button
-            variant="ghost"
+            variant="destructive"
             size="sm"
-            onClick={() => navigate('/')}
+            onClick={handleEndInterview}
           >
-            <Home className="h-4 w-4 mr-2" />
-            Home
+            <Square className="h-4 w-4 mr-2" />
+            End Interview
           </Button>
-          
-          <div className="flex items-center gap-4">
-            <Badge variant="outline" className="flex items-center gap-2">
-              <Timer className="h-3 w-3" />
-              {formatTime(timeLeft)}
-            </Badge>
-            
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleEndInterview}
-            >
-              <Square className="h-4 w-4 mr-2" />
-              End Interview
-            </Button>
-          </div>
+
+          <Badge variant="outline" className="flex items-center gap-2">
+            <Timer className="h-3 w-3" />
+            {formatTime(timeLeft)}
+          </Badge>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Persona Section */}
-        <div className="w-80 bg-card border-r border-border p-6 flex flex-col items-center space-y-4">
-          <div className="relative">
-            <img
-              src={persona.image}
-              alt={persona.name}
-              className="w-32 h-32 rounded-full object-cover border-4 border-border"
-            />
-            {isSpeaking && (
-              <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
-                <div className="flex items-center gap-1 bg-primary text-primary-foreground px-3 py-1 rounded-full text-xs">
-                  <div className="flex gap-1">
-                    <div className="w-1 h-3 bg-current rounded-full animate-pulse"></div>
-                    <div className="w-1 h-4 bg-current rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-1 h-3 bg-current rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="w-1 h-4 bg-current rounded-full animate-pulse" style={{ animationDelay: '0.3s' }}></div>
-                  </div>
-                  <span className="ml-1">Speaking</span>
-                </div>
-              </div>
-            )}
-          </div>
-          
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Persona Top Section */}
+        <div className="px-6 pt-8 pb-4 flex flex-col items-center gap-3">
+          <img
+            src={persona.image}
+            alt={persona.name}
+            className="w-28 h-28 rounded-full object-cover border-4 border-border"
+          />
           <div className="text-center">
             <h2 className="text-xl font-semibold text-foreground">{persona.name}</h2>
             <p className="text-sm text-muted-foreground">{persona.style}</p>
           </div>
-          
-          <div className="mt-auto pt-6 space-y-2 text-center">
-            <div className="text-xs text-muted-foreground">Interview Type</div>
-            <Badge variant="secondary" className="capitalize">
-              {interviewData.type.replace('-', ' ')}
-            </Badge>
-          </div>
-        </div>
 
-        {/* Chat Section */}
-        <div className="flex-1 flex flex-col">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.map((message) => (
+          {/* Animated voice lines when speaking */}
+          <div className="h-8 flex items-end gap-1 mt-2" aria-hidden>
+            {[...Array(24)].map((_, i) => (
               <div
-                key={message.id}
-                className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[70%] p-4 rounded-lg ${
-                    message.sender === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-foreground'
-                  }`}
-                >
-                  <p className="text-sm">{message.content}</p>
-                  <div className="text-xs opacity-70 mt-2">
-                    {message.timestamp.toLocaleTimeString()}
-                  </div>
-                </div>
-              </div>
-            ))}
-            
-            {isTyping && (
-              <div className="flex justify-start">
-                <div className="bg-muted text-foreground p-4 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                    <span className="text-xs text-muted-foreground">Typing...</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Input Area */}
-          <div className="border-t border-border p-6">
-            <div className="flex gap-3">
-              <Textarea
-                value={currentMessage}
-                onChange={(e) => setCurrentMessage(e.target.value)}
-                placeholder="Type your response..."
-                className="min-h-[60px] max-h-[120px] resize-none"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
+                key={i}
+                className={`w-1 rounded-sm ${isSpeaking ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                style={{
+                  height: isSpeaking ? `${4 + ((i * 7) % 24)}px` : '4px',
+                  animation: isSpeaking ? `bounce-${(i % 5) + 1} 1.2s infinite ease-in-out` as any : undefined,
                 }}
               />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!currentMessage.trim() || isTyping}
-                className="self-end"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              Press Enter to send, Shift+Enter for new line
-            </div>
+            ))}
+          </div>
+
+          {/* Interviewer transcript (subtle) */}
+          <div className="max-w-3xl text-center text-xs text-muted-foreground mt-1">
+            {messages.filter(m => m.sender === 'interviewer').slice(-1)[0]?.content}
+          </div>
+
+          {/* Listening indicator */}
+          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+            {isListening ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
+            {isListening ? 'Listening for your response…' : 'Waiting…'}
           </div>
         </div>
+
+        {/* Transcript feed */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[70%] p-3 rounded-lg ${
+                  message.sender === 'user'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground text-xs opacity-90'
+                }`}
+              >
+                <p className={`${message.sender === 'user' ? 'text-sm' : 'text-xs'}`}>{message.content}</p>
+                <div className="text-[10px] opacity-70 mt-1">
+                  {message.timestamp.toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Live interim user transcript */}
+          {isListening && userInterimTranscript && (
+            <div className="flex justify-end">
+              <div className="max-w-[70%] p-3 rounded-lg border border-primary/40 text-foreground">
+                <p className="text-sm opacity-80">{userInterimTranscript}</p>
+                <div className="text-[10px] opacity-60 mt-1">Speaking…</div>
+              </div>
+            </div>
+          )}
+
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="bg-muted text-foreground p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <span className="text-xs text-muted-foreground">Thinking…</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Local keyframes for waveform animation */}
+      <style>{`
+        @keyframes bounce-1 { 0%,100%{transform:scaleY(0.4)} 50%{transform:scaleY(1)} }
+        @keyframes bounce-2 { 0%,100%{transform:scaleY(0.5)} 50%{transform:scaleY(1)} }
+        @keyframes bounce-3 { 0%,100%{transform:scaleY(0.3)} 50%{transform:scaleY(1)} }
+        @keyframes bounce-4 { 0%,100%{transform:scaleY(0.6)} 50%{transform:scaleY(1)} }
+        @keyframes bounce-5 { 0%,100%{transform:scaleY(0.45)} 50%{transform:scaleY(1)} }
+      `}</style>
     </div>
   );
 }
